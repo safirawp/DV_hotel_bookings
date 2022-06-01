@@ -1,0 +1,445 @@
+---
+title: "Hotel Booking Analysis"
+author: "Safira Widya Putri"
+date: "2022-05-22"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    highlight: tango
+    df_print: paged
+    toc: 6
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+  # html_document:
+    # theme: material
+    # highlight: default
+# 
+#     df_print: paged
+#     toc: true
+#     toc_float:
+#       collapsed: true
+#       smooth_scroll: false
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 100)
+options(warn=-1)
+```
+
+<style>
+body {
+text-align: justify}
+</style>
+
+## Introduction
+
+This data contains booking information of hotel. Data includes information such as when the booking was made, lead time, country, the number of adults, children, and/or babies, etc. Source of data from [Kaggle](https://www.kaggle.com/datasets/jessemostipak/hotel-booking-demand).
+
+## Set Up Library
+
+First, we must set up the library that we needed.
+
+```{r message=FALSE}
+library(lubridate)
+library(dplyr)
+library(GGally)
+library(ggplot2)
+library(plotly)
+library(glue)
+library(scales)
+```
+
+
+## Data Preparation
+
+### Input Data
+
+Input our data and put it into ‘hotel_bookings’ object. We use `stringsAsFactors = True`, so all columns with character data type will be converted into factors.
+
+```{r message=FALSE}
+hotel_bookings <- read.csv("hotel_bookings.csv", stringsAsFactors = T)
+```
+
+Overview our data:
+
+```{r message=FALSE}
+head(hotel_bookings)
+```
+
+```{r message=FALSE}
+tail(hotel_bookings)
+```
+
+### Data Structure
+
+Check the number of columns and rows.
+
+```{r message=FALSE}
+dim(hotel_bookings)
+```
+Data contains 119,390 rows and 32 columns.
+
+View all columns and the data types.
+
+```{r message=FALSE}
+glimpse(hotel_bookings)
+```
+Some of data types are not in the correct type.
+
+### Pre-processing Data
+
+Convert the data type!
+
+The column **is_canceled**, **arrival_date_year**, and **is_repeated_guest** should be Factor, **reservation_status_date** should be Date, and we have to sort month's name from **arrival_date_month**. Then we can delete columns that are not used in this analysis.
+
+```{r message=FALSE}
+hotel_bookings <- hotel_bookings %>%
+  select(-c(previous_cancellations, previous_bookings_not_canceled, agent, company)) %>% 
+  mutate(is_canceled = factor(is_canceled, levels = c(0, 1), labels = c("No", "Yes")),
+         arrival_date_year = as.factor(arrival_date_year),
+         is_repeated_guest = factor(is_repeated_guest, levels = c(0, 1), labels = c("No", "Yes")),
+         reservation_status_date = ymd(reservation_status_date),
+         arrival_date_month = factor(arrival_date_month, levels = c(
+      "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"),ordered = TRUE))
+```
+
+Now the data type of all columns are correct. Next, checking the missing value.
+
+```{r message=FALSE}
+colSums(is.na(hotel_bookings))
+```
+
+We found 4 missing values in Children column. Convert the missing values to 0.
+
+```{r message=FALSE}
+hotel_bookings <- hotel_bookings %>% 
+  mutate(children = replace(children, is.na(children), 0))
+```
+
+Let's take a look data again!
+
+```{r message=FALSE}
+head(hotel_bookings)
+```
+
+### Data Summary
+
+Summary of all columns.
+
+```{r message=FALSE}
+summary(hotel_bookings)
+```
+
+## Question and Visualization
+
+1.	Which is the most busy year?
+
+```{r message=FALSE}
+# Subset data
+bookings <- hotel_bookings %>% 
+  select(arrival_date_year,arrival_date_month) %>% 
+  mutate(count = 1) %>% 
+  group_by(arrival_date_year, arrival_date_month) %>% 
+  summarise(count = sum(count))
+colnames(bookings) <- c("Year","Month", "Total")
+bookings <- bookings %>% 
+  mutate(label=glue("Year: {Year}
+                    Month: {Month}
+                    Total Bookings: {comma(Total)}"))
+
+#Plotting
+bookings_plot <- ggplot(data = bookings, aes(x = Total, 
+                              y = Year, text = label)) +
+  geom_col(aes(fill = Month)) +
+  labs(title = "Number of Booking Per Year",
+       x = "Total Bookings",
+       y = "Year",
+       fill = "Month") +
+  scale_x_continuous(labels = comma) +
+  coord_flip() +
+  theme_minimal()
+
+
+ggplotly(bookings_plot, tooltip = "text")
+```
+
+Based on the visualization above, the most busy year occured in 2016. But several months in 2015 and 2017 were not available in this dataset. Data in 2015 are available from July-December while 2017 are available from January-August.
+
+2.	How much do guests pay for a room per night?
+
+```{r message=FALSE}
+# Subset data
+room_price <- hotel_bookings %>% 
+  select(hotel, assigned_room_type, adr) %>%
+  mutate(adr = replace(adr, 48516, 0)) %>% #replace outlier with 0 in row 48516
+  group_by(hotel, assigned_room_type)
+colnames(room_price) <- c("Hotel","Room_Type", "Price")
+
+#Plotting
+room_price_plot <- ggplot(room_price, aes(x = Room_Type, y = Price, color = Hotel)) +
+  geom_boxplot() +
+  facet_grid(.~Hotel) +
+  labs(title = "Price In Each Hotel and Room Type",
+       x = "Room Type",
+       y = "Price",
+       fill = "Hotel")
+ggplotly(room_price_plot)
+```
+
+Price for each hotel and room type are quite variety.
+
+3.	How about the reservation status in each hotel?
+
+```{r message=FALSE}
+# Subset Data
+reservation <- hotel_bookings %>% 
+  select(hotel, reservation_status) %>%
+  mutate(count = 1) %>%
+  group_by(hotel, reservation_status) %>% 
+  summarise(count = sum(count))
+colnames(reservation) <- c("Hotel","Reservation_Status", "Total")
+reservation <- reservation %>% 
+  mutate(label=glue("Hotel: {Hotel}
+                    Reservation Status: {Reservation_Status}
+                    Total: {comma(Total)}"))
+
+
+#Plotting
+reservation_plot <- ggplot(data = reservation, aes(x = Total, 
+                              y = reorder(Reservation_Status,-Total), fill = Hotel, text = label)) +
+  geom_col(aes(fill = Hotel)) +
+  facet_grid(.~Hotel)+
+  coord_flip() +
+  labs(title = "Reservation Status In Each Hotel",
+       x = "Total",
+       y = "Reservation Status",
+       fill = "Hotel") +
+  scale_x_continuous(labels = comma) +
+  theme_minimal() 
+ggplotly(reservation_plot, tooltip = "text")
+
+```
+
+Most bookings were not canceled or the guest stayed at a hotel. However, there are quite a lot of guest who canceled.
+
+4.	How many guests (adult+children+babies) stayed at hotel in year?
+
+```{r message = FALSE}
+# Subset Data
+
+guests_stayed <- hotel_bookings %>% 
+  select(hotel, arrival_date_year, reservation_status, reservation_status_date, adults, children, babies) %>% 
+  filter(reservation_status == "Check-Out") %>% 
+  mutate(guests = adults + children + babies) %>% 
+  group_by(hotel, arrival_date_year) %>% 
+  summarise(guests = sum(guests))
+colnames(guests_stayed) <- c("Hotel","Year", "Guests")
+guests_stayed <- guests_stayed %>% 
+  mutate(label=glue("Hotel: {Hotel}
+                    Year: {Year}
+                    Total Guests: {comma(Guests)}"))
+
+# Plotting
+guests_stayed_plot <- ggplot(data = guests_stayed, aes(x = Guests, 
+                              y = Year, fill = Hotel, text = label)) +
+  geom_col(aes(fill = Hotel)) +
+  facet_grid(.~Hotel) +
+  labs(title = "Total of Guests Stayed In Hotel",
+       x = "Total Guest",
+       y = "Year",
+       fill = "Hotel") +
+  scale_x_continuous(labels = comma) +
+  theme_minimal() 
+ggplotly(guests_stayed_plot, tooltip = "text")
+```
+
+In 2016, total guests reached 44,433 person in city hotel and 26,432 in resort hotel.
+
+5.	From where the most guests are stayed in hotel?
+
+```{r message=FALSE}
+# Subset Data
+country_guest <- hotel_bookings %>% 
+  select(country, reservation_status) %>% 
+  filter(reservation_status == "Check-Out") %>% 
+  mutate(count = 1) %>% 
+  group_by(country) %>% 
+  summarise(count = sum(count)) %>% 
+  arrange(-count) %>%
+  top_n(10)
+colnames(country_guest) <- c("Country","Total")
+country_guest <- country_guest %>% 
+  mutate(label=glue("Country: {Country}
+                    Total: {comma(Total)}"))
+
+# Plotting
+country_guest_plot <- ggplot(data = country_guest, aes(x = Total, 
+                              y = reorder(Country, -Total), text = label)) +
+  geom_col(aes(fill = Country)) +
+  coord_flip() +
+  labs(title = "Top 10 Highest Booking Country",
+       x = "Total Bookings",
+       y = "Country") +
+  scale_x_continuous(labels = comma) +
+  theme_minimal()
+ggplotly(country_guest_plot, tooltip = "text")
+
+```
+
+6.	How many guests visited hotel more than once?
+
+```{r message=FALSE}
+# Subset Data
+repeated <- as.data.frame(table(hotel_bookings$is_repeated_guest))
+colnames(repeated) <- c("Repeated","Total")
+
+# Plotting
+repeated_plot <-  plot_ly(type='pie', labels=repeated$Repeated, values=repeated$Total, 
+               textinfo='label+percent',
+               insidetextorientation='radial')
+repeated_plot %>% layout(title = 'Repeated Guest')
+```
+
+Most guest never booked at the same place. The percentage of repeated guest is very low.
+
+7.	How many requirement of parking spaces based on customer type?
+
+```{r message=FALSE}
+# Subset Data
+parking_spaces <- hotel_bookings %>% 
+  select(required_car_parking_spaces, customer_type) %>% 
+  group_by(customer_type) %>% 
+  summarise(required_car_parking_spaces = sum(required_car_parking_spaces))
+colnames(parking_spaces) <- c("Customer_Type","Parking_Space")
+parking_spaces <- parking_spaces %>% 
+  mutate(label=glue("Customer Type: {Customer_Type}
+                    Total Parking Spaces: {comma(Parking_Space)}"))
+
+# Plotting
+parking_spaces_plot <- ggplot(parking_spaces, aes(x = reorder(Customer_Type, Parking_Space), 
+                    y = Parking_Space, text = label)) +
+  geom_segment(aes(x = reorder(Customer_Type, Parking_Space), xend = reorder(Customer_Type, Parking_Space), y = 0, yend = Parking_Space), color="black") +
+  geom_point(color="orange") +
+  coord_flip() +
+  labs(title = "Parking Spaces Based on Customer Type",
+       x = "Customer Type",
+       y = "Parking Spaces") +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+ggplotly(parking_spaces_plot, tooltip = "text")
+```
+
+Most guests from Transient and Transient-Party's type need a lot of parking spaces.
+
+8.	Which hotel have maximum number of cancellation of bookings? Are they give the deposit?
+
+```{r message=FALSE}
+# Subset Data
+cancel_deposit <- hotel_bookings %>% 
+  select(hotel, is_canceled, deposit_type) %>%
+  filter(is_canceled == "Yes") %>% 
+  mutate(count = 1) %>%
+  group_by(hotel, deposit_type) %>%
+  summarise(count = sum(count))
+colnames(cancel_deposit) <- c("Hotel","Deposit_Type","Total")
+cancel_deposit <- cancel_deposit %>% 
+  mutate(label=glue("Hotel: {Hotel}
+                    Deposit Type: {Deposit_Type}
+                    Total: {comma(Total)}"))
+
+# Plotting
+cancel_deposit_plot <- ggplot(data = cancel_deposit, aes(x = Total, 
+                              y = Hotel, fill = Hotel, text = label)) +
+  geom_col(aes(fill = Hotel)) +
+  facet_grid(.~Deposit_Type)+
+  coord_flip() +
+  labs(title = "Guest Canceled in Each Hotel",
+       x = "Total",
+       y = "Reservation Status",
+       fill = "Hotel") +
+  scale_x_continuous(labels = comma)
+ggplotly(cancel_deposit_plot, tooltip = "text")
+```
+
+Mostly they did not give deposit. But the number of people canceled a Non-Refund booking was quite high.
+
+9.	Which type of customers are more likely to cancel the booking?
+
+```{r message=FALSE}
+#Subset Data
+customers_cancel <- hotel_bookings %>% 
+  select(is_canceled, customer_type) %>% 
+  filter(is_canceled == "Yes") %>% 
+  mutate(count = 1) %>% 
+  group_by(customer_type) %>%
+  summarise(count = sum(count))
+
+# Plotting
+customers_cancel_plot <- plot_ly(type='pie', hole = 0.5, labels=customers_cancel$customer_type, values=customers_cancel$count, 
+               textinfo='label+percent', insidetextorientation='radial')
+customers_cancel_plot %>% layout(title = 'Canceled Based on Customer Type')
+```
+
+Type of customer are more likely to cancel the booking was Transient and Transient-Party.
+
+10.	Does lead time affect guest deciding to cancel?
+
+```{r message=FALSE}
+#Subset Data
+lead_time <- hotel_bookings %>% 
+  select(arrival_date_year, lead_time, is_canceled)
+colnames(lead_time) <- c("Year","Lead_Time","Canceled")
+
+# Plotting
+lead_time_plot <- ggplot(lead_time, aes(x=Year, y=Lead_Time, fill=Canceled)) + 
+  geom_violin() +
+  geom_hline(yintercept=0, alpha=0.5) +
+  labs(title = "Canceled Lead Time",
+       x = "Lead Time",
+       y = "Year",
+       fill = "Canceled") +
+  theme_minimal()
+ggplotly(lead_time_plot)
+```
+
+The tendency for longer lead times will cause most guest to cancel.
+
+11.	Which Distribution Channel is mostly preferred for bookings?
+
+```{r message=FALSE}
+distribution <- as.data.frame(table(hotel_bookings$distribution_channel))
+colnames(distribution) <- c("Distribution","Total")
+distribution <- distribution %>% 
+  mutate(label=glue("Distribution Channel: {Distribution}
+                    Total Bookings: {comma(Total)}"))
+
+distribution_plot <- ggplot(data = distribution, aes(x = Total, 
+                              y = reorder(Distribution, Total),
+                              text = label)) +
+  geom_col(aes(fill = Total)) +
+  scale_fill_gradient(low="grey", high="black") +
+  labs(title = "Booking Distribution Channel",
+       x = "Total Bookings",
+       y = "Distribution Channel") +
+  scale_x_continuous(labels = comma) +
+  theme_minimal()
+
+ggplotly(distribution_plot, tooltip = "text")
+```
+
+The number of bookings from the TA/TO distribution channel is the highest.
+
+## Conclusion
+
+1. City Hotel have more bookings than Resort Hotel. Resort Hotel may have to increase their advertising.
+2. There are a lot of guests that canceled the booking. Hotel can send them a survey when they canceled the booking, so we can know the reason why they canceled.
+3. The percentage of repeated guest is just 3.19%. Hotel may give discounts for guests who have stayed before.
+4. Hotel need to prepare parking spaces for Transient and Transient-Party, but we know that Transient and Transient-Party are the type of customer that more likely to cancel their booking even though they booked a non-refund booking.
+5. Hotel must consider the lead time for customer because the longer lead time the more likely to cancel.
+
